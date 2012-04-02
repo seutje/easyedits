@@ -1,0 +1,7 @@
+name = Easy Edits
+description = "Allows inline editing through a formatter."
+package = Fields
+version = "7.x-1.x-dev"
+dependencies[] = entity
+
+core = 7.x

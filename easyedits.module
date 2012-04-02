@@ -1,0 +1,194 @@
+<?php
+
+/**
+ * @file
+ * Easy Edits module,
+ * largely based on a sandbox project by kmadel (http://drupal.org/user/288818).
+ */
+
+/**
+ * Implementation of hook_field_formatter_info().
+ */
+function easyedits_field_formatter_info() {
+  return array(
+    'easyedits' => array(
+      'label' => t('Easily editable'),
+      'field types' => array('text','text_long','text_with_summary','list_text'),
+      'settings' => array(
+        'fallback_format' => NULL,
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_formatter_settings_form().
+ */
+function easyedits_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
+  //This gets the view_mode where our settings are stored
+  $display = $instance['display'][$view_mode];
+  //This gets the actual settings
+  $settings = $display['settings'];  
+  $element = array();
+  
+  //had an issue when using this formatter in a View, results in a Fatal error: undefined function field_ui_formatter_options() i
+  if (!function_exists('field_ui_formatter_options')) {
+    module_load_include('inc', 'field_ui', 'field_ui.admin');
+  }
+  
+  //fallback formatter
+  // Get the list of formatters for this field type, and remove our own.
+  $formatters = field_ui_formatter_options($field['type']);
+  unset($formatters['easyedits']); 
+  $element['fallback_format'] = array(
+    '#type' => 'select',
+    '#title' => t('Fallback formatter'),
+    '#options' => $formatters,
+    '#description'    => t('The format to be used when not in edit mode.'),
+    '#default_value' => $settings['fallback_format'],
+  );
+
+  return $element;
+}
+
+/**
+ * Implements hook_field_formatter_settings_summary().
+ */
+function easyedits_field_formatter_settings_summary($field, $instance, $view_mode) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+  $formatter_type = field_info_formatter_types($settings['fallback_format']);//get label of fallback formater for summary info
+  $summary = t('Fallback format: @fallback_format format (Select format to be used when not in edit mode.)', array(
+    '@fallback_format'     => $formatter_type['label'],
+  ));
+  return $summary;
+}
+
+
+/**
+ * Format a field using the fallback formatter of the editable field.
+ */
+function easyedits_fallback_formatter($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  // Set the fallback formatter.
+  $display['type'] = $display['settings']['fallback_format'];
+  $formatter_type = field_info_formatter_types($display['type']);
+  $display['module'] = $formatter_type['module'];
+
+  // Clone the entity to avoid messing with it.
+  $cloned_entity = clone $entity;
+
+  return field_view_field($entity_type, $cloned_entity, $field['field_name'], $display, $langcode);
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function easyedits_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  // See if access to this form element is restricted,
+  //if so, skip widget processing and just set the value.
+  if (!entity_access('update', $entity_type, $entity) || !field_access('edit', $field, $entity_type, $entity)) {
+    // Can't edit.
+    return easyedits_fallback_formatter($entity_type, $entity, $field, $instance, $langcode, $items, $display);
+  }
+  // This usually isn't loaded as we aren't on the node edit page.
+  if (!function_exists('node_form')) {
+    module_load_include('inc', 'node', 'node.pages');
+  }
+  // @todo: Support other entities
+  $entity->easyedits = array(
+    'field_name' => $field['field_name'],
+    'instance' => $instance,
+    'langcode' => $langcode,
+  );
+  $form = drupal_get_form($entity->type . '_node_form', $entity);
+  // @todo: figure out if it's better to render one form per node.
+  $element = array();
+  foreach ($items as $delta => $item) {
+    $markup = '<div class="easyedits-wrapper" data-nid="' . $entity->nid . '" data-fieldname="' . $field['field_name']. '">';
+    $markup .= '<div class="easyedits-output">' . $item['value'] . '</div>';
+    $markup .= '<div class="easyedits-form element-invisible">' . render($form) . '</div>';
+    $markup .= '</div>';
+    $element[$delta] = array('#markup' => $markup);
+  }
+
+  return $element;
+}
+
+/**
+ * Implements hook_node_form_alter(). 
+ */
+function easyedits_form_node_form_alter(&$form, &$form_state, $form_id) {
+  if (isset($form['#node']->easyedits)) {
+    _easyedits_node_form_alter($form, $form_state, $form_id);
+  }
+}
+
+/**
+ * Implements hook_menu().
+ */
+function easyedits_menu() {
+
+  $items['easyedits/ajax'] = array(
+    'title' => t('Easy Edits AJAX POST path'),
+    'type' => MENU_CALLBACK,
+    'page callback' => 'easyedits_ajax',
+    'access arguments' => array('access content'),
+  );
+
+  return $items;
+}
+
+/**
+ * AJAX POST callback.
+ * @todo: check form.
+ */
+function easyedits_ajax () {
+  $node = node_load($_POST['nid']);
+  $fieldname = $_POST['easyedits'];
+  $field = array(
+    'field_name' => $fieldname
+  );
+  if (!entity_access('update', 'node', $node) || !field_access('edit', $field, 'node', $node)) {
+    drupal_access_denied();
+  }
+  $node->{$fieldname} = $_POST[$fieldname];
+  node_save($node);
+  $node = node_load($_POST['nid']);
+  drupal_json_output($node->{$fieldname});
+  return;
+}
+
+/**
+ * Node form alter helper.
+ * @param type $form
+ * @param type $form_state
+ * @param type $form_id 
+ */
+function _easyedits_node_form_alter(&$form, &$form_state, $form_id) {
+  $field = $form['#node']->easyedits['field_name'];
+  $instance = $form['#node']->easyedits['instance'];
+  $langcode = $form['#node']->easyedits['langcode'];
+  foreach ($form as $delta => $item) {
+    if ($delta != 'actions' && $delta != $field && is_array($item) && isset($item['#type']) && $item['#type'] != 'hidden' && $item['#type'] != 'value') {
+      $form[$delta]['#access'] = FALSE;
+    }
+  }
+  $form['nid']['#type']= 'hidden';
+  $form['easyedits-fieldname'] = array(
+    '#type' => 'hidden',
+    '#value' => $field,
+  );
+//  $form['easyedits-instance'] = array(
+//    '#type' => 'hidden',
+//    '#value' => $instance,
+//  );
+//  $form['easyedits-langcode'] = array(
+//    '#type' => 'hidden',
+//    '#value' => $langcode,
+//  );
+  // Gotta make sure the js file gets added after wysiwyg.js (for detach)
+  drupal_add_js(base_path() . drupal_get_path('module', 'easyedits') . '/js/easyedits.js', array('scope' => 'footer', 'weight' => JS_LIBRARY + 110));
+  // @todo: Figure out possible support for preview/delete.
+  unset($form['actions']['preview']);
+  unset($form['actions']['delete']);
+}
