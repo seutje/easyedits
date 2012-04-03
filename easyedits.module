@@ -92,7 +92,7 @@ function easyedits_fallback_formatter($entity_type, $entity, $field, $instance, 
  */
 function easyedits_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
   // See if access to this form element is restricted,
-  //if so, skip widget processing and just set the value.
+  // if so, skip widget processing and just set the value.
   if (!entity_access('update', $entity_type, $entity) || !field_access('edit', $field, $entity_type, $entity)) {
     // Can't edit.
     return easyedits_fallback_formatter($entity_type, $entity, $field, $instance, $langcode, $items, $display);
@@ -101,11 +101,11 @@ function easyedits_field_formatter_view($entity_type, $entity, $field, $instance
   if (!function_exists('node_form')) {
     module_load_include('inc', 'node', 'node.pages');
   }
-  // @todo: Support other entities
   $entity->easyedits = array(
     'field_name' => $field['field_name'],
     'view_mode' => $display['settings']['view_mode'],
   );
+  // @todo: Support other entities
   $form = drupal_get_form($entity->type . '_node_form', $entity);
   // @todo: figure out if it's better to render one form per node.
   $element = array();
@@ -130,47 +130,14 @@ function easyedits_form_node_form_alter(&$form, &$form_state, $form_id) {
 }
 
 /**
- * Implements hook_menu().
+ * AJAX form submit callback.
  */
-function easyedits_menu() {
-
-  $items['easyedits/ajax'] = array(
-    'title' => t('Easy Edits AJAX POST path'),
-    'type' => MENU_CALLBACK,
-    'page callback' => 'easyedits_ajax',
-    'access arguments' => array('access content'),
-  );
-
-  return $items;
-}
-
-/**
- * AJAX POST callback.
- * @todo: check form.
- */
-function easyedits_ajax () {
-  $node = node_load($_POST['nid']);
-  $fieldname = $_POST['easyedits-fieldname'];
-  $view_mode = $_POST['easyedits-viewmode'];
-  $field = array(
-    'field_name' => $fieldname
-  );
-  if (!entity_access('update', 'node', $node) || !field_access('edit', $field, 'node', $node)) {
-    drupal_access_denied();
-  }
-  foreach ($_POST[$fieldname] as $lang => $items) {
-    foreach ($items as $key => $value) {
-      $node->{$fieldname}[$lang][$key]['value'] = $_POST[$fieldname][$lang][$key]['value'];
-      $node->{$fieldname}[$lang][$key]['format'] = $_POST[$fieldname][$lang][$key]['format'];
-    }
-  }
-  node_save($node);
-  $node = node_load($_POST['nid']);
-  // For some reason, this is giving us some random malfomed entity bullshit.
-  // same thing when I do node_view(node_load(1));
-  $output = field_view_field('node', $node, $fieldname, $view_mode);
-  drupal_json_output(array('output' => render($output), 'id' => $_POST['easyedits-id']));
-  return;
+function easyedits_ajax($form, $form_state) {
+  $node = $form['#node'];
+  $fieldname = $form['easyedits-fieldname']['#value'];
+  $view_mode = $form['easyedits-viewmode']['#value'];
+  $output = field_view_field('node', $node, $fieldname, $view_mode); // Fatal error:  Cannot unset string offsets in [drupal root]/modules/field/field.default.inc on line 42
+  return $output;
 }
 
 /**
@@ -182,19 +149,19 @@ function easyedits_ajax () {
 function _easyedits_node_form_alter(&$form, &$form_state, $form_id) {
   $field = $form['#node']->easyedits['field_name'];
   $view_mode = $form['#node']->easyedits['view_mode'];
+  // Disable access to most form elements
   foreach ($form as $delta => $item) {
     if ($delta != 'actions' && $delta != $field && is_array($item) && isset($item['#type']) && $item['#type'] != 'hidden' && $item['#type'] != 'value') {
       $form[$delta]['#access'] = FALSE;
     }
   }
-  // We're gonna need the nid.
-  $form['nid']['#type']= 'hidden';
+  // We're gonna need the field name and view mode.
   $form['easyedits-fieldname'] = array(
-    '#type' => 'hidden',
+    '#type' => 'value',
     '#value' => $field,
   );
   $form['easyedits-viewmode'] = array(
-    '#type' => 'hidden',
+    '#type' => 'value',
     '#value' => $view_mode,
   );
   // Gotta make sure the js file gets added after wysiwyg.js (for detach)
@@ -202,23 +169,10 @@ function _easyedits_node_form_alter(&$form, &$form_state, $form_id) {
   // @todo: Figure out possible support for preview/delete.
   unset($form['actions']['preview']);
   unset($form['actions']['delete']);
-  // Set our own validation as first
-  array_unshift($form['#validate'], 'easyedits_node_edit_validate');
-  $form['actions']['submit']['#submit'][] = 'easyedits_node_edit_submit';
-}
-
-/**
- * Node form validation.
- */
-function easyedits_node_edit_validate($form, &$form_state) {
-  // Avoid stale form error
-  $form_state['values']['changed'] =  time();
-}
-
-/**
- * Node form submit.
- */
-function easyedits_node_edit_submit($form, &$form_state) {
-  // Avoid redirect
-  unset($form_state['redirect']);
+  $form['actions']['submit']['#ajax'] = array(
+    'callback' => 'easyedits_ajax',
+    'wrapper' => 'easyedits-active-wrapper',
+    'effect' => 'fade',
+  );
+  form_load_include($form_state, 'inc', 'node', 'node.pages');
 }
