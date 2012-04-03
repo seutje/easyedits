@@ -8,10 +8,11 @@ Drupal.behaviors.easyedits = {
     .each(this.exec);
   },
   exec: function() {
+    // Add unique identifier
+    this.id = 'easyedits-' + new Date().getTime();
     // @todo: Click sucks, consider making it focusable.
     $('.easyedits-output', this).bind('click', Drupal.behaviors.easyedits.activate);
-    var $form = $('.easyedits-form', this).find('form'); 
-    $form.bind('submit', Drupal.behaviors.easyedits.submit);
+    $('.easyedits-form', this).find('form').bind('submit', Drupal.behaviors.easyedits.submit);
   },
   activate: function() {
     // @todo: Clean up.
@@ -23,23 +24,28 @@ Drupal.behaviors.easyedits = {
   },
   submit: function(e) {
     e.preventDefault();
-    var $form = $(this);
+    // We don't use serialize() because we need to add the id
+    var data = $(this).serializeArray();
+    data.push({
+      name: 'easyedits-id',
+      value: $(this).closest('.easyedits-wrapper')[0].id
+    });
+    data = $.param(data);
     $.ajax({
       url: Drupal.settings.basePath + 'easyedits/ajax',
-      data: $form.serialize(),
+      data: data,
       type: 'POST',
       success: Drupal.behaviors.easyedits.success
-      
     });
   },
   success: function(data, textStatus, jqXHR) {
-    var safe, unsafe;
-    for (var i in data) {
-      for (var j = 0; j < data[i].length; j++) {
-        console.log(data[i][j]);
-      }
-    }
-    console.log(data);
+    // Swap old field with new and run behaviors
+    var $old = $('#' + data.id),
+        $new = $(data.output).find('.easyedits-wrapper');
+    // Use a temporary wrapper as our behavior doesn't attach to the context
+    Drupal.attachBehaviors($new.wrapAll('<div />').parent());
+    // Don't add the temporary wrapper
+    $old.replaceWith($new);
   }
 };
 

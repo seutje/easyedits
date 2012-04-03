@@ -16,6 +16,7 @@ function easyedits_field_formatter_info() {
       'field types' => array('text','text_long','text_with_summary','list_text'),
       'settings' => array(
         'fallback_format' => NULL,
+        'view_mode' => NULL,
       ),
     ),
   );
@@ -47,7 +48,11 @@ function easyedits_field_formatter_settings_form($field, $instance, $view_mode, 
     '#description'    => t('The format to be used when not in edit mode.'),
     '#default_value' => $settings['fallback_format'],
   );
-
+  // We need the view mode when ajaxing
+  $element['view_mode'] = array(
+    '#type' => 'value',
+    '#value' => $view_mode,
+  );
   return $element;
 }
 
@@ -61,6 +66,8 @@ function easyedits_field_formatter_settings_summary($field, $instance, $view_mod
   $summary = t('Fallback format: @fallback_format format (Select format to be used when not in edit mode.)', array(
     '@fallback_format'     => $formatter_type['label'],
   ));
+  $summary .= ' view mode: ' . $settings['view_mode'];
+  // @todo: Support fallback format settings.
   return $summary;
 }
 
@@ -97,14 +104,13 @@ function easyedits_field_formatter_view($entity_type, $entity, $field, $instance
   // @todo: Support other entities
   $entity->easyedits = array(
     'field_name' => $field['field_name'],
-    'instance' => $instance,
-    'langcode' => $langcode,
+    'view_mode' => $display['settings']['view_mode'],
   );
   $form = drupal_get_form($entity->type . '_node_form', $entity);
   // @todo: figure out if it's better to render one form per node.
   $element = array();
   foreach ($items as $delta => $item) {
-    $markup = '<div class="easyedits-wrapper" data-nid="' . $entity->nid . '" data-fieldname="' . $field['field_name']. '">';
+    $markup = '<div class="easyedits-wrapper">';
     $markup .= '<div class="easyedits-output">' . $item['value'] . '</div>';
     $markup .= '<div class="easyedits-form element-invisible">' . render($form) . '</div>';
     $markup .= '</div>';
@@ -144,7 +150,8 @@ function easyedits_menu() {
  */
 function easyedits_ajax () {
   $node = node_load($_POST['nid']);
-  $fieldname = $_POST['easyedits'];
+  $fieldname = $_POST['easyedits-fieldname'];
+  $view_mode = $_POST['easyedits-viewmode'];
   $field = array(
     'field_name' => $fieldname
   );
@@ -154,7 +161,8 @@ function easyedits_ajax () {
   $node->{$fieldname} = $_POST[$fieldname];
   node_save($node);
   $node = node_load($_POST['nid']);
-  drupal_json_output($node->{$fieldname});
+  $output = field_view_field('node', $node, $fieldname, $view_mode);
+  drupal_json_output(array('output' => render($output), 'id' => $_POST['easyedits-id']));
   return;
 }
 
@@ -166,26 +174,22 @@ function easyedits_ajax () {
  */
 function _easyedits_node_form_alter(&$form, &$form_state, $form_id) {
   $field = $form['#node']->easyedits['field_name'];
-  $instance = $form['#node']->easyedits['instance'];
-  $langcode = $form['#node']->easyedits['langcode'];
+  $view_mode = $form['#node']->easyedits['view_mode'];
   foreach ($form as $delta => $item) {
     if ($delta != 'actions' && $delta != $field && is_array($item) && isset($item['#type']) && $item['#type'] != 'hidden' && $item['#type'] != 'value') {
       $form[$delta]['#access'] = FALSE;
     }
   }
+  // We're gonna need the nid.
   $form['nid']['#type']= 'hidden';
   $form['easyedits-fieldname'] = array(
     '#type' => 'hidden',
     '#value' => $field,
   );
-//  $form['easyedits-instance'] = array(
-//    '#type' => 'hidden',
-//    '#value' => $instance,
-//  );
-//  $form['easyedits-langcode'] = array(
-//    '#type' => 'hidden',
-//    '#value' => $langcode,
-//  );
+  $form['easyedits-viewmode'] = array(
+    '#type' => 'hidden',
+    '#value' => $view_mode,
+  );
   // Gotta make sure the js file gets added after wysiwyg.js (for detach)
   drupal_add_js(base_path() . drupal_get_path('module', 'easyedits') . '/js/easyedits.js', array('scope' => 'footer', 'weight' => JS_LIBRARY + 110));
   // @todo: Figure out possible support for preview/delete.
