@@ -158,9 +158,16 @@ function easyedits_ajax () {
   if (!entity_access('update', 'node', $node) || !field_access('edit', $field, 'node', $node)) {
     drupal_access_denied();
   }
-  $node->{$fieldname} = $_POST[$fieldname];
+  foreach ($_POST[$fieldname] as $lang => $items) {
+    foreach ($items as $key => $value) {
+      $node->{$fieldname}[$lang][$key]['value'] = $_POST[$fieldname][$lang][$key]['value'];
+      $node->{$fieldname}[$lang][$key]['format'] = $_POST[$fieldname][$lang][$key]['format'];
+    }
+  }
   node_save($node);
   $node = node_load($_POST['nid']);
+  // For some reason, this is giving us some random malfomed entity bullshit.
+  // same thing when I do node_view(node_load(1));
   $output = field_view_field('node', $node, $fieldname, $view_mode);
   drupal_json_output(array('output' => render($output), 'id' => $_POST['easyedits-id']));
   return;
@@ -170,7 +177,7 @@ function easyedits_ajax () {
  * Node form alter helper.
  * @param type $form
  * @param type $form_state
- * @param type $form_id 
+ * @param type $form_id
  */
 function _easyedits_node_form_alter(&$form, &$form_state, $form_id) {
   $field = $form['#node']->easyedits['field_name'];
@@ -195,4 +202,23 @@ function _easyedits_node_form_alter(&$form, &$form_state, $form_id) {
   // @todo: Figure out possible support for preview/delete.
   unset($form['actions']['preview']);
   unset($form['actions']['delete']);
+  // Set our own validation as first
+  array_unshift($form['#validate'], 'easyedits_node_edit_validate');
+  $form['actions']['submit']['#submit'][] = 'easyedits_node_edit_submit';
+}
+
+/**
+ * Node form validation.
+ */
+function easyedits_node_edit_validate($form, &$form_state) {
+  // Avoid stale form error
+  $form_state['values']['changed'] =  time();
+}
+
+/**
+ * Node form submit.
+ */
+function easyedits_node_edit_submit($form, &$form_state) {
+  // Avoid redirect
+  unset($form_state['redirect']);
 }
