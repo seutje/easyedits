@@ -97,16 +97,12 @@ function easyedits_field_formatter_view($entity_type, $entity, $field, $instance
     // Can't edit.
     return easyedits_fallback_formatter($entity_type, $entity, $field, $instance, $langcode, $items, $display);
   }
-  // This usually isn't loaded as we aren't on the node edit page.
-  if (!function_exists('node_form')) {
-    module_load_include('inc', 'node', 'node.pages');
-  }
-  $entity->easyedits = array(
+  $options = array(
     'field_name' => $field['field_name'],
     'view_mode' => $display['settings']['view_mode'],
   );
   // @todo: Support other entities
-  $form = drupal_get_form($entity->type . '_node_form', $entity);
+  $form = drupal_get_form('easyedits_helper_form', $entity, $options);
   // @todo: figure out if it's better to render one form per node.
   $element = array();
   foreach ($items as $delta => $item) {
@@ -116,39 +112,21 @@ function easyedits_field_formatter_view($entity_type, $entity, $field, $instance
     $markup .= '</div>';
     $element[$delta] = array('#markup' => $markup);
   }
-
+  drupal_add_js(base_path() . drupal_get_path('module', 'easyedits') . '/js/easyedits.js');
   return $element;
 }
 
-/**
- * Implements hook_node_form_alter(). 
- */
-function easyedits_form_node_form_alter(&$form, &$form_state, $form_id) {
-  if (isset($form['#node']->easyedits)) {
-    _easyedits_node_form_alter($form, $form_state, $form_id);
+function easyedits_helper_form($form, &$form_state, $entity, $options) {
+  $field = $options['field_name'];
+  $view_mode = $options['view_mode'];
+  // This usually isn't loaded as we aren't on the node edit page.
+  if (!function_exists('node_form')) {
+    module_load_include('inc', 'node', 'node.pages');
   }
-}
-
-/**
- * AJAX form submit callback.
- */
-function easyedits_ajax($form, $form_state) {
-  $node = $form['#node'];
-  $fieldname = $form['easyedits-fieldname']['#value'];
-  $view_mode = $form['easyedits-viewmode']['#value'];
-  $output = field_view_field('node', $node, $fieldname, $view_mode); // Fatal error:  Cannot unset string offsets in [drupal root]/modules/field/field.default.inc on line 42
-  return $output;
-}
-
-/**
- * Node form alter helper.
- * @param type $form
- * @param type $form_state
- * @param type $form_id
- */
-function _easyedits_node_form_alter(&$form, &$form_state, $form_id) {
-  $field = $form['#node']->easyedits['field_name'];
-  $view_mode = $form['#node']->easyedits['view_mode'];
+  // Grab the node form.
+  $form = drupal_get_form($entity->type . '_node_form', $entity);
+  // Errors out on submit if we don't add this.
+  $form_state['node'] = $entity;
   // Disable access to most form elements
   foreach ($form as $delta => $item) {
     if ($delta != 'actions' && $delta != $field && is_array($item) && isset($item['#type']) && $item['#type'] != 'hidden' && $item['#type'] != 'value') {
@@ -164,15 +142,26 @@ function _easyedits_node_form_alter(&$form, &$form_state, $form_id) {
     '#type' => 'value',
     '#value' => $view_mode,
   );
-  // Gotta make sure the js file gets added after wysiwyg.js (for detach)
-  drupal_add_js(base_path() . drupal_get_path('module', 'easyedits') . '/js/easyedits.js', array('scope' => 'footer', 'weight' => JS_LIBRARY + 110));
   // @todo: Figure out possible support for preview/delete.
   unset($form['actions']['preview']);
   unset($form['actions']['delete']);
+  // This doesn't get attached at all
   $form['actions']['submit']['#ajax'] = array(
     'callback' => 'easyedits_ajax',
     'wrapper' => 'easyedits-active-wrapper',
     'effect' => 'fade',
   );
-  form_load_include($form_state, 'inc', 'node', 'node.pages');
+  dsm($form);
+  return $form;
+}
+
+/**
+ * AJAX form submit callback.
+ */
+function easyedits_ajax($form, $form_state) {
+  $node = $form['#node'];
+  $fieldname = $form['easyedits-fieldname']['#value'];
+  $view_mode = $form['easyedits-viewmode']['#value'];
+  $output = field_view_field('node', $node, $fieldname, $view_mode); // Fatal error:  Cannot unset string offsets in [drupal root]/modules/field/field.default.inc on line 42
+  return $output;
 }
